@@ -206,18 +206,34 @@ export default function Home() {
 
   // 4) Start camera
   async function startCamera() {
-    setStatus("ขอสิทธิ์กล้อง...");
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user" },
-      audio: false,
-    });
-    if (!videoRef.current) return;
-    videoRef.current.srcObject = stream;
-    await videoRef.current.play();
-    loopRunningRef.current = true;
-    setIsRunning(true);
-    setStatus("กำลังทำงาน...");
-    requestAnimationFrame(loop);
+    try {
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setStatus("❌ Camera API not supported on this device/browser");
+        return;
+      }
+
+      // Check if HTTPS (required for iPhone)
+      if (window.location.protocol !== "https:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+        setStatus("⚠️ HTTPS required for camera on this network");
+        return;
+      }
+
+      setStatus("ขอสิทธิ์กล้อง...");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      if (!videoRef.current) return;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+      loopRunningRef.current = true;
+      setIsRunning(true);
+      setStatus("กำลังทำงาน...");
+      requestAnimationFrame(loop);
+    } catch (err: any) {
+      setStatus(`❌ ${err?.message || "Camera error"}`);
+    }
   }
 
   // 4.5) Stop camera
