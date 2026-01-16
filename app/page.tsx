@@ -72,6 +72,21 @@ import * as ort from "onnxruntime-web";
 
 type CvType = any;
 
+// Emotion to emoji and color mapping
+const emotionMap: Record<string, { emoji: string; color: string; bgColor: string }> = {
+  happy: { emoji: "😊", color: "text-yellow-500", bgColor: "bg-yellow-50" },
+  disgust: { emoji: "🤢", color: "text-green-500", bgColor: "bg-green-50" },
+  sad: { emoji: "😢", color: "text-blue-500", bgColor: "bg-blue-50" },
+  angry: { emoji: "😠", color: "text-red-500", bgColor: "bg-red-50" },
+  surprise: { emoji: "😮", color: "text-purple-500", bgColor: "bg-purple-50" },
+  neutral: { emoji: "😐", color: "text-gray-500", bgColor: "bg-gray-50" },
+  fear: { emoji: "😨", color: "text-indigo-500", bgColor: "bg-indigo-50" },
+};
+
+function getEmotionStyle(emotion: string) {
+  return emotionMap[emotion.toLowerCase()] || { emoji: "🤔", color: "text-gray-500", bgColor: "bg-gray-50" };
+}
+
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -79,11 +94,13 @@ export default function Home() {
   const [status, setStatus] = useState<string>("ยังไม่เริ่ม");
   const [emotion, setEmotion] = useState<string>("-");
   const [conf, setConf] = useState<number>(0);
+  const [isRunning, setIsRunning] = useState<boolean>(false);
 
   const cvRef = useRef<CvType | null>(null);
   const faceCascadeRef = useRef<any>(null);
   const sessionRef = useRef<ort.InferenceSession | null>(null);
   const classesRef = useRef<string[] | null>(null);
+  const loopRunningRef = useRef<boolean>(false);
 
   // Load OpenCV.js
   // async function loadOpenCV() {
@@ -197,8 +214,31 @@ export default function Home() {
     if (!videoRef.current) return;
     videoRef.current.srcObject = stream;
     await videoRef.current.play();
+    loopRunningRef.current = true;
+    setIsRunning(true);
     setStatus("กำลังทำงาน...");
     requestAnimationFrame(loop);
+  }
+
+  // 4.5) Stop camera
+  function stopCamera() {
+    loopRunningRef.current = false;
+    if (videoRef.current && videoRef.current.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    // Clear canvas
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+    }
+    setIsRunning(false);
+    setEmotion("-");
+    setConf(0);
+    setStatus("หยุดแล้ว");
   }
 
   // 5) Preprocess face ROI -> tensor
@@ -241,6 +281,8 @@ export default function Home() {
   // 7) Main loop
   async function loop() {
     try {
+      if (!loopRunningRef.current) return;
+
       const cv = cvRef.current;
       const faceCascade = faceCascadeRef.current;
       const session = sessionRef.current;
@@ -249,7 +291,9 @@ export default function Home() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!cv || !faceCascade || !session || !classes || !video || !canvas) {
-        requestAnimationFrame(loop);
+        if (loopRunningRef.current) {
+          requestAnimationFrame(loop);
+        }
         return;
       }
 
@@ -338,7 +382,9 @@ export default function Home() {
       gray.delete();
       faces.delete();
 
-      requestAnimationFrame(loop);
+      if (loopRunningRef.current) {
+        requestAnimationFrame(loop);
+      }
     } catch (e: any) {
       setStatus(`ผิดพลาด: ${e?.message ?? e}`);
     }
@@ -365,36 +411,67 @@ export default function Home() {
   }, []);
 
   return (
-    <main className="min-h-screen p-6 space-y-4">
-      <h1 className="text-2xl font-bold">Face Emotion (OpenCV + YOLO11-CLS)</h1>
+    <main 
+      className="min-h-screen p-6 flex items-center justify-center"
+      style={{
+        background: "linear-gradient(218deg, rgba(49, 202, 222, 1) 0%, rgba(107, 107, 255, 1) 25%, rgba(244, 122, 255, 1) 75%, rgba(255, 77, 133, 1) 100%)"
+      }}
+    >
+      <div className="w-full max-w-3xl space-y-4">
+        <h1 className="text-3xl font-bold text-center text-white drop-shadow-lg">Face Emotion (OpenCV + YOLO11-CLS)</h1>
 
-      <div className="space-y-2">
-        <div className="text-sm">สถานะ: {status}</div>
-        <div className="text-sm">
-          Emotion: <b>{emotion}</b> | Conf: <b>{(conf * 100).toFixed(1)}%</b>
+        <div className="space-y-2 text-center bg-white rounded-lg p-4 shadow-lg">
+          <div className="text-sm font-semibold text-gray-700">สถานะ: <span className="text-blue-600">{status}</span></div>
+          <div className="text-lg">
+            <span className="text-3xl">{getEmotionStyle(emotion).emoji}</span> <b className={`text-2xl ${getEmotionStyle(emotion).color}`}>{emotion}</b>
+          </div>
+          
+          {/* Confidence Progress Bar */}
+          <div className="mt-3 space-y-1">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Confidence</span>
+              <span className="font-bold">{(conf * 100).toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-green-400 to-blue-500 transition-all duration-300 rounded-full"
+                style={{ width: `${conf * 100}%` }}
+              />
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="flex gap-3">
-        <button
-          className="px-4 py-2 rounded bg-black text-white"
-          onClick={startCamera}
-        >
-          Start Camera
-        </button>
-      </div>
+        <div className="flex gap-3 justify-center">
+          <button
+            className="px-6 py-2 rounded-lg bg-green-500 text-white font-semibold hover:bg-green-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={startCamera}
+            disabled={isRunning}
+          >
+            ▶ Start Camera
+          </button>
+          <button
+            className="px-6 py-2 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={stopCamera}
+            disabled={!isRunning}
+          >
+            ⏹ Stop Camera
+          </button>
+        </div>
 
-      <div className="relative w-full max-w-3xl">
-        <video ref={videoRef} className="hidden" playsInline />
-        <canvas
-          ref={canvasRef}
-          className="w-full rounded border"
-        />
-      </div>
+        <div className="flex justify-center">
+          <div className="relative w-full bg-white p-3 rounded-lg shadow-2xl">
+            <video ref={videoRef} className="hidden" playsInline />
+            <canvas
+              ref={canvasRef}
+              className="w-full rounded border-2 border-gray-200"
+            />
+          </div>
+        </div>
 
-      <p className="text-sm text-gray-600">
-        หมายเหตุ: ต้องกดปุ่ม Start เพื่อขอสิทธิ์เปิดกล้อง
-      </p>
+        <p className="text-sm text-white text-center drop-shadow-lg font-semibold">
+          หมายเหตุ: ต้องกดปุ่ม Start เพื่อขอสิทธิ์เปิดกล้อง
+        </p>
+      </div>
     </main>
   );
 }
